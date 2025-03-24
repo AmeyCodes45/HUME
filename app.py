@@ -1,11 +1,13 @@
 from flask import Flask, request, jsonify
 import requests
 import json
+import time
+import os
 
 app = Flask(__name__)
 
 # Replace with your Hume AI API key
-HUME_API_KEY = "YOUR_HUME_API_KEY"
+HUME_API_KEY = os.environ.get("HUME_API_KEY", "YOUR_HUME_API_KEY")
 
 # Define levels based on thresholds
 def get_level(score):
@@ -16,6 +18,7 @@ def get_level(score):
     else:
         return "Low"
 
+
 @app.route("/process_hume", methods=["POST"])
 def process_hume():
     # Get job_id from the request
@@ -25,16 +28,26 @@ def process_hume():
     if not job_id:
         return jsonify({"error": "Job ID is required"}), 400
 
+    print(f"Received job_id: {job_id}")  # ✅ Debug Log
+
+    # Delay to allow Hume API to process results
+    time.sleep(15)  # ✅ Wait for 15 seconds
+
     # Fetch results from Hume API
     url = f"https://api.hume.ai/v1/jobs/{job_id}"
     headers = {"Authorization": f"Bearer {HUME_API_KEY}"}
+
+    print("Fetching results from Hume API...")  # ✅ Debug Log
     response = requests.get(url, headers=headers)
+    print(f"API Response: {response.status_code}, {response.text}")  # ✅ Debug Log
 
     if response.status_code != 200:
         return jsonify({"error": "Failed to retrieve data from Hume AI"}), 500
 
     # Parse the JSON result
     results = response.json()
+
+    # Handle invalid format
     try:
         predictions = results["results"]["predictions"][0]["models"]["face"]["grouped_predictions"][0]["predictions"]
     except KeyError:
@@ -89,8 +102,11 @@ def process_hume():
         "confidence_level": get_level(confidence_score),
     }
 
+    print(f"Generated result: {result}")  # ✅ Debug Log
     return jsonify(result), 200
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # ✅ Dynamically fetch port to work with Render
+    port = int(os.environ.get("PORT", 10000))  # Default to 10000 if PORT is not set
+    app.run(host="0.0.0.0", port=port, debug=True)
