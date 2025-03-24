@@ -35,7 +35,7 @@ def process_hume():
 
     # Fetch results from Hume API
     url = f"https://api.hume.ai/v1/jobs/{job_id}/predictions"
-    headers = {"X-Hume-Api-Key": f" {HUME_API_KEY}"}
+    headers = {"X-Hume-Api-Key": f"{HUME_API_KEY}"}
 
     print("Fetching results from Hume API...")  # ✅ Debug Log
     response = requests.get(url, headers=headers)
