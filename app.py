@@ -19,7 +19,7 @@ def get_level(score):
         return "Low"
 
 
-@app.route("/process_hume", methods=["POST"])
+@app.route("/process_hume", methods=["GET"])
 def process_hume():
     # Get job_id from the request
     data = request.json
