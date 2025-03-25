@@ -42,13 +42,13 @@ def process_hume():
     url = f"https://api.hume.ai/v0/batch/jobs/{job_id}/predictions"
     headers = {"X-Hume-Api-Key": HUME_API_KEY}
 
-    max_retries = 12  # Try for 120 seconds max (12 x 10 sec)
+    max_retries = 18  # Increased to 3 minutes (18 x 10 sec)
     results = None
 
     for i in range(max_retries):
         logging.info(f"⏳ Attempt {i + 1}/{max_retries} - Fetching results from Hume API...")
         try:
-            response = requests.get(url, headers=headers, timeout=15)
+            response = requests.get(url, headers=headers, timeout=30)  # Increased timeout to 30 sec
         except requests.exceptions.RequestException as e:
             logging.error(f"⚠️ API request failed: {str(e)}")
             return jsonify({"error": "Failed to connect to Hume API"}), 500
@@ -76,6 +76,12 @@ def process_hume():
         elif response.status_code == 404:
             logging.error("⚠️ Invalid job_id or results not found.")
             return jsonify({"error": "Invalid job_id or results not ready"}), 404
+        elif response.status_code == 401:
+            logging.error("❗️ Unauthorized - Invalid Hume API Key.")
+            return jsonify({"error": "Unauthorized - Check your API Key"}), 401
+        elif response.status_code == 500:
+            logging.error("⚠️ Hume API internal error.")
+            return jsonify({"error": "Hume API internal error"}), 500
 
         time.sleep(10)  # Wait before retrying
 
@@ -88,8 +94,8 @@ def process_hume():
         predictions = (
             results[0]["results"]["predictions"][0]["models"]["face"]["grouped_predictions"][0]["predictions"]
         )
-        if not predictions:
-            logging.error("⚠️ No predictions found in the API response.")
+        if not predictions or not isinstance(predictions, list):
+            logging.error("⚠️ No valid predictions in the API response.")
             return jsonify({"error": "No predictions found in Hume API results"}), 500
     except (KeyError, IndexError, TypeError) as e:
         logging.error(f"⚠️ Invalid data format or missing predictions: {str(e)}")
@@ -100,7 +106,7 @@ def process_hume():
     engagement_sum, nervousness_sum, confidence_sum = 0, 0, 0
     frame_count = len(predictions)
 
-    # 📊 Process each frame to calculate scores
+    # 📊 Process each frame to calculate scores efficiently
     for frame in predictions:
         emotions = frame.get("emotions", [])
         for emotion in emotions:
@@ -109,20 +115,18 @@ def process_hume():
             if name and (name not in emotion_scores or score > emotion_scores[name]):
                 emotion_scores[name] = score
 
-        # Engagement Score → Concentration, Interest, Excitement
-        engagement_sum += sum(
-            [emotion["score"] for emotion in emotions if emotion["name"] in ["Concentration", "Interest", "Excitement"]]
-        ) / 3 if len(emotions) > 0 else 0
+        # Aggregate Scores for Engagement, Nervousness, and Confidence
+        engagement_sum += (
+            sum(emotion["score"] for emotion in emotions if emotion["name"] in ["Concentration", "Interest", "Excitement"]) / 3
+        ) if emotions else 0
 
-        # Nervousness Score → Anxiety, Distress, Doubt
-        nervousness_sum += sum(
-            [emotion["score"] for emotion in emotions if emotion["name"] in ["Anxiety", "Distress", "Doubt"]]
-        ) / 3 if len(emotions) > 0 else 0
+        nervousness_sum += (
+            sum(emotion["score"] for emotion in emotions if emotion["name"] in ["Anxiety", "Distress", "Doubt"]) / 3
+        ) if emotions else 0
 
-        # Confidence Score → Determination, Pride, Satisfaction
-        confidence_sum += sum(
-            [emotion["score"] for emotion in emotions if emotion["name"] in ["Determination", "Pride", "Satisfaction"]]
-        ) / 3 if len(emotions) > 0 else 0
+        confidence_sum += (
+            sum(emotion["score"] for emotion in emotions if emotion["name"] in ["Determination", "Pride", "Satisfaction"]) / 3
+        ) if emotions else 0
 
     # 🥇 Get top emotion
     top_emotion = max(emotion_scores, key=emotion_scores.get, default="Neutral")
