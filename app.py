@@ -63,6 +63,11 @@ def process_hume():
                 # ✅ Check if results are in the expected format
                 if isinstance(results, list) and len(results) > 0 and "results" in results[0]:
                     logging.info("🎉 Hume API results ready! Proceeding to processing...")
+
+                    # ✅ Save Full JSON for Debugging
+                    with open("hume_api_response.json", "w") as f:
+                        json.dump(results, f, indent=4)
+                    logging.info("✅ Full Hume API JSON saved for inspection.")
                     break
                 else:
                     logging.error("⚠️ Unexpected response format or no results found.")
@@ -128,12 +133,12 @@ def process_hume():
         # ✅ Confidence Score - Corrected logic
         confidence_scores = [e["score"] for e in emotions if e["name"].lower() in confidence_emotions]
         if confidence_scores:
-            confidence_sum += sum(confidence_scores) / len(confidence_emotions)
+            confidence_sum += sum(confidence_scores) / len(confidence_scores)
 
         # ✅ Nervousness Score - Corrected logic
         nervousness_scores = [e["score"] for e in emotions if e["name"].lower() in nervousness_emotions]
         if nervousness_scores:
-            nervousness_sum += sum(nervousness_scores) / len(nervousness_emotions)
+            nervousness_sum += sum(nervousness_scores) / len(nervousness_scores)
 
     # ✅ Top Emotion - Most Frequent with max occurrences
     final_top_emotion = max(emotion_scores, key=emotion_scores.get, default="Neutral")
