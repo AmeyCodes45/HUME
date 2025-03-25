@@ -176,6 +176,21 @@ def process_hume():
     logging.info(f"✅ Corrected result: {result}")
     return jsonify(result), 200
 
+@app.route("/get_hume_json", methods=["GET"])
+def get_hume_json():
+    file_path = "hume_api_response.json"
+
+    if not os.path.exists(file_path):
+        logging.error("⚠️ hume_api_response.json file not found.")
+        return jsonify({"error": "hume_api_response.json not found"}), 404
+
+    try:
+        return send_file(file_path, as_attachment=True, download_name="hume_api_response.json")
+    except Exception as e:
+        logging.error(f"⚠️ Error while sending file: {str(e)}")
+        return jsonify({"error": "Error while sending the file"}), 500
+
+
 
 if __name__ == "__main__":
     # ✅ Fetch port dynamically for deployment
