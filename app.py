@@ -39,7 +39,7 @@ def process_hume():
     logging.info(f"✅ Received job_id: {job_id}")
 
     # 🕰️ Poll Hume API for results with retries
-    url = f"https://api.hume.ai/v0/jobs/{job_id}/predictions"
+    url = f"https://api.hume.ai/v0/batch/jobs/{job_id}/predictions"
     headers = {"X-Hume-Api-Key": HUME_API_KEY}
 
     max_retries = 12  # Try for 120 seconds max (12 x 10 sec)
