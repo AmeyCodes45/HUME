@@ -44,7 +44,7 @@ def process_hume():
 
     max_retries = 12  # Try for 120 seconds max (12 x 10 sec)
     response = None
-    results = {}
+    results = []
 
     for i in range(max_retries):
         logging.info(f"⏳ Attempt {i + 1}/{max_retries} - Fetching results from Hume API...")
@@ -60,7 +60,12 @@ def process_hume():
         if response.status_code == 200:
             try:
                 results = response.json()
-                state = results.get("state", "unknown")
+                if isinstance(results, list):
+                    state = results[0].get("state", "unknown")
+                else:
+                    logging.error("⚠️ Unexpected response format: results should be a list.")
+                    return jsonify({"error": "Unexpected API response format"}), 500
+
                 if state == "done":
                     logging.info("🎉 Hume API results ready!")
                     break
@@ -75,19 +80,19 @@ def process_hume():
 
         time.sleep(10)  # Wait before retrying
 
-    if not response or response.status_code != 200 or results.get("state") != "done":
+    if not response or response.status_code != 200 or state != "done":
         logging.error("❌ Failed to retrieve data from Hume API after retries.")
         return jsonify({"error": "Failed to retrieve data from Hume AI"}), 500
 
     # 🧠 Process API response
     try:
         predictions = (
-            results["results"]["predictions"][0]["models"]["face"]["grouped_predictions"][0]["predictions"]
+            results[0]["results"]["predictions"][0]["models"]["face"]["grouped_predictions"][0]["predictions"]
         )
         if not predictions:
             logging.error("⚠️ No predictions found in the API response.")
             return jsonify({"error": "No predictions found in Hume API results"}), 500
-    except (KeyError, IndexError) as e:
+    except (KeyError, IndexError, TypeError) as e:
         logging.error(f"⚠️ Invalid data format or missing predictions: {str(e)}")
         return jsonify({"error": "Invalid data format from Hume API"}), 500
 
