@@ -11,9 +11,9 @@ logging.basicConfig(level=logging.DEBUG)
 app = Flask(__name__)
 
 # ✅ Replace with your Hume AI API key (Ensure API Key is set correctly)
-HUME_API_KEY = os.environ.get("HUME_API_KEY", "YOUR_HUME_API_KEY")
+HUME_API_KEY = os.environ.get("HUME_API_KEY")
 
-if not HUME_API_KEY or HUME_API_KEY == "YOUR_HUME_API_KEY":
+if not HUME_API_KEY:
     logging.error("❗️ HUME_API_KEY is not set. Please configure it in environment variables.")
     exit(1)
 
@@ -42,8 +42,9 @@ def process_hume():
     url = f"https://api.hume.ai/v0/jobs/{job_id}/predictions"
     headers = {"X-Hume-Api-Key": HUME_API_KEY}
 
-    max_retries = 6  # Try for 60 seconds max (6 x 10 sec)
+    max_retries = 12  # Try for 120 seconds max (12 x 10 sec)
     response = None
+    results = {}
 
     for i in range(max_retries):
         logging.info(f"⏳ Attempt {i + 1}/{max_retries} - Fetching results from Hume API...")
@@ -59,9 +60,12 @@ def process_hume():
         if response.status_code == 200:
             try:
                 results = response.json()
-                if results.get("state") == "done":
+                state = results.get("state", "unknown")
+                if state == "done":
                     logging.info("🎉 Hume API results ready!")
                     break
+                else:
+                    logging.info(f"⏳ Current state: {state}. Retrying...")
             except json.JSONDecodeError:
                 logging.error("⚠️ Error parsing JSON response from Hume API")
                 return jsonify({"error": "Failed to parse Hume API response"}), 500
@@ -71,13 +75,18 @@ def process_hume():
 
         time.sleep(10)  # Wait before retrying
 
-    if not response or response.status_code != 200:
+    if not response or response.status_code != 200 or results.get("state") != "done":
         logging.error("❌ Failed to retrieve data from Hume API after retries.")
         return jsonify({"error": "Failed to retrieve data from Hume AI"}), 500
 
     # 🧠 Process API response
     try:
-        predictions = results["results"]["predictions"][0]["models"]["face"]["grouped_predictions"][0]["predictions"]
+        predictions = (
+            results["results"]["predictions"][0]["models"]["face"]["grouped_predictions"][0]["predictions"]
+        )
+        if not predictions:
+            logging.error("⚠️ No predictions found in the API response.")
+            return jsonify({"error": "No predictions found in Hume API results"}), 500
     except (KeyError, IndexError) as e:
         logging.error(f"⚠️ Invalid data format or missing predictions: {str(e)}")
         return jsonify({"error": "Invalid data format from Hume API"}), 500
@@ -115,10 +124,13 @@ def process_hume():
     top_emotion = max(emotion_scores, key=emotion_scores.get, default="Neutral")
     top_emotion_score = emotion_scores.get(top_emotion, 0)
 
-    # 📈 Calculate average scores
-    engagement_score = round(engagement_sum / frame_count, 2) if frame_count else 0
-    nervousness_score = round(nervousness_sum / frame_count, 2) if frame_count else 0
-    confidence_score = round(confidence_sum / frame_count, 2) if frame_count else 0
+    # 📈 Calculate average scores (avoid division by zero)
+    if frame_count > 0:
+        engagement_score = round(engagement_sum / frame_count, 2)
+        nervousness_score = round(nervousness_sum / frame_count, 2)
+        confidence_score = round(confidence_sum / frame_count, 2)
+    else:
+        engagement_score, nervousness_score, confidence_score = 0, 0, 0
 
     # 🎁 Generate response
     result = {
