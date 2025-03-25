@@ -44,6 +44,7 @@ def process_hume():
 
     max_retries = 18  # Increased to 3 minutes (18 x 10 sec)
     results = None
+    state = "unknown"
 
     for i in range(max_retries):
         logging.info(f"⏳ Attempt {i + 1}/{max_retries} - Fetching results from Hume API...")
@@ -59,15 +60,22 @@ def process_hume():
         if response.status_code == 200:
             try:
                 results = response.json()
-                if isinstance(results, list) and results:
-                    state = results[0].get("state", "unknown")
+
+                # ✅ Handle different formats of API response
+                if isinstance(results, list) and len(results) > 0:
+                    # Check if 'state' or 'status' is available
+                    state = results[0].get("state") or results[0].get("status", "unknown")
                 else:
                     logging.error("⚠️ Unexpected response format: results should be a list.")
                     return jsonify({"error": "Unexpected API response format"}), 500
 
+                # ✅ Check if results are ready
                 if state == "done":
                     logging.info("🎉 Hume API results ready!")
                     break
+                elif state == "unknown" and i >= 5:  # Stop after 5 retries if state is unknown
+                    logging.error("❗️ State remained unknown after multiple retries.")
+                    return jsonify({"error": "Hume API returned unknown state"}), 500
                 else:
                     logging.info(f"⏳ Current state: {state}. Retrying...")
             except json.JSONDecodeError:
