@@ -88,12 +88,16 @@ def process_hume():
 
     # 🧠 Process API response
     try:
-        predictions = (
-            results[0]["results"]["predictions"][0]["models"]["face"]["grouped_predictions"][0]["predictions"]
-        )
+        predictions = []
+        for result in results:
+            for prediction in result["results"]["predictions"]:
+                if "grouped_predictions" in prediction["models"]["face"]:
+                    predictions.extend(prediction["models"]["face"]["grouped_predictions"][0]["predictions"])
+
         if not predictions or not isinstance(predictions, list):
             logging.error("⚠️ No valid predictions in the API response.")
             return jsonify({"error": "No predictions found in Hume API results"}), 500
+
     except (KeyError, IndexError, TypeError) as e:
         logging.error(f"⚠️ Invalid data format or missing predictions: {str(e)}")
         return jsonify({"error": "Invalid data format from Hume API"}), 500
@@ -124,12 +128,12 @@ def process_hume():
         # ✅ Confidence Score - Corrected logic
         confidence_scores = [e["score"] for e in emotions if e["name"].lower() in confidence_emotions]
         if confidence_scores:
-            confidence_sum += sum(confidence_scores) / len(confidence_scores)
+            confidence_sum += sum(confidence_scores) / len(confidence_emotions)
 
         # ✅ Nervousness Score - Corrected logic
         nervousness_scores = [e["score"] for e in emotions if e["name"].lower() in nervousness_emotions]
         if nervousness_scores:
-            nervousness_sum += sum(nervousness_scores) / len(nervousness_scores)
+            nervousness_sum += sum(nervousness_scores) / len(nervousness_emotions)
 
     # ✅ Top Emotion - Most Frequent with max occurrences
     final_top_emotion = max(emotion_scores, key=emotion_scores.get, default="Neutral")
