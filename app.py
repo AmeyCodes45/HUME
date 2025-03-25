@@ -34,7 +34,7 @@ def process_hume():
     time.sleep(15)  # ✅ Wait for 15 seconds
 
     # Fetch results from Hume API
-    url = f"https://api.hume.ai/v1/jobs/{job_id}/predictions"
+    url = f"https://api.hume.ai/v0/jobs/{job_id}/predictions"
     headers = {"X-Hume-Api-Key": f"{HUME_API_KEY}"}
 
     print("Fetching results from Hume API...")  # ✅ Debug Log
