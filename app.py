@@ -105,7 +105,7 @@ def process_hume():
     # 🔍 Initialize variables for analysis
     emotion_scores = {}
     top_emotions = []
-    confidence_sum, nervousness_sum = 0, 0
+    confidence_sum, nervousness_sum, switches = 0, 0, 0
     frame_count = len(predictions)
 
     # 📊 Process each frame to calculate scores efficiently
@@ -121,16 +121,19 @@ def process_hume():
             emotion_scores.get(top_emotion_frame["name"], 0) + 1
         )
 
-        # ✅ Confidence Score
+        # ✅ Confidence Score - Corrected logic
         confidence_scores = [e["score"] for e in emotions if e["name"].lower() in confidence_emotions]
-        confidence_sum += sum(confidence_scores) / len(confidence_emotions) if confidence_scores else 0
+        if confidence_scores:
+            confidence_sum += sum(confidence_scores) / len(confidence_scores)
 
-        # ✅ Nervousness Score
+        # ✅ Nervousness Score - Corrected logic
         nervousness_scores = [e["score"] for e in emotions if e["name"].lower() in nervousness_emotions]
-        nervousness_sum += sum(nervousness_scores) / len(nervousness_emotions) if nervousness_scores else 0
+        if nervousness_scores:
+            nervousness_sum += sum(nervousness_scores) / len(nervousness_scores)
 
-    # ✅ Top Emotion - Most Frequent
+    # ✅ Top Emotion - Most Frequent with max occurrences
     final_top_emotion = max(emotion_scores, key=emotion_scores.get, default="Neutral")
+    top_emotion_count = emotion_scores.get(final_top_emotion, 0)
 
     # ✅ Engagement Score - Emotion Switches Count
     switches = sum(1 for i in range(1, len(top_emotions)) if top_emotions[i] != top_emotions[i - 1])
@@ -141,9 +144,18 @@ def process_hume():
     nervousness_score = round(nervousness_sum / frame_count, 2) if frame_count > 0 else 0
     engagement_score = round(engagement_score, 2)
 
+    # ✅ Determine the emotion level correctly based on frequency
+    emotion_level = (
+        "Excellent"
+        if top_emotion_count / frame_count >= 0.7
+        else "Good"
+        if top_emotion_count / frame_count >= 0.4
+        else "Average"
+    )
+
     # 🎁 Generate response
     result = {
-        "top_emotion": f"{final_top_emotion} ({'Excellent' if emotion_scores[final_top_emotion] > 0.7 else 'Good' if emotion_scores[final_top_emotion] > 0.4 else 'Average'})",
+        "top_emotion": f"{final_top_emotion} ({emotion_level})",
         "engagement_score": engagement_score,
         "engagement_level": get_level(engagement_score),
         "nervousness_score": nervousness_score,
