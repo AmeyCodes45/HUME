@@ -43,8 +43,7 @@ def process_hume():
     headers = {"X-Hume-Api-Key": HUME_API_KEY}
 
     max_retries = 12  # Try for 120 seconds max (12 x 10 sec)
-    response = None
-    results = []
+    results = None
 
     for i in range(max_retries):
         logging.info(f"⏳ Attempt {i + 1}/{max_retries} - Fetching results from Hume API...")
@@ -60,7 +59,7 @@ def process_hume():
         if response.status_code == 200:
             try:
                 results = response.json()
-                if isinstance(results, list):
+                if isinstance(results, list) and results:
                     state = results[0].get("state", "unknown")
                 else:
                     logging.error("⚠️ Unexpected response format: results should be a list.")
@@ -80,7 +79,7 @@ def process_hume():
 
         time.sleep(10)  # Wait before retrying
 
-    if not response or response.status_code != 200 or state != "done":
+    if not results or state != "done":
         logging.error("❌ Failed to retrieve data from Hume API after retries.")
         return jsonify({"error": "Failed to retrieve data from Hume AI"}), 500
 
@@ -103,27 +102,27 @@ def process_hume():
 
     # 📊 Process each frame to calculate scores
     for frame in predictions:
-        emotions = frame["emotions"]
+        emotions = frame.get("emotions", [])
         for emotion in emotions:
-            name = emotion["name"]
-            score = emotion["score"]
-            if name not in emotion_scores or score > emotion_scores[name]:
+            name = emotion.get("name", "")
+            score = emotion.get("score", 0)
+            if name and (name not in emotion_scores or score > emotion_scores[name]):
                 emotion_scores[name] = score
 
         # Engagement Score → Concentration, Interest, Excitement
         engagement_sum += sum(
             [emotion["score"] for emotion in emotions if emotion["name"] in ["Concentration", "Interest", "Excitement"]]
-        ) / 3
+        ) / 3 if len(emotions) > 0 else 0
 
         # Nervousness Score → Anxiety, Distress, Doubt
         nervousness_sum += sum(
             [emotion["score"] for emotion in emotions if emotion["name"] in ["Anxiety", "Distress", "Doubt"]]
-        ) / 3
+        ) / 3 if len(emotions) > 0 else 0
 
         # Confidence Score → Determination, Pride, Satisfaction
         confidence_sum += sum(
             [emotion["score"] for emotion in emotions if emotion["name"] in ["Determination", "Pride", "Satisfaction"]]
-        ) / 3
+        ) / 3 if len(emotions) > 0 else 0
 
     # 🥇 Get top emotion
     top_emotion = max(emotion_scores, key=emotion_scores.get, default="Neutral")
