@@ -61,13 +61,15 @@ def process_hume():
             try:
                 results = response.json()
 
-                # ✅ Handle different formats of API response
-                if isinstance(results, list) and len(results) > 0:
-                    # Check if 'state' or 'status' is available
-                    state = results[0].get("state") or results[0].get("status", "unknown")
-                else:
-                    logging.error("⚠️ Unexpected response format: results should be a list.")
-                    return jsonify({"error": "Unexpected API response format"}), 500
+                
+        # ✅ Skip state check if results are available
+        if isinstance(results, list) and len(results) > 0 and "results" in results[0]:
+            logging.info("🎉 Hume API results ready! Proceeding to processing...")
+            break
+        else:
+            logging.error("⚠️ Unexpected response format or no results found.")
+            return jsonify({"error": "Unexpected API response format or no results found"}), 500
+
 
                 # ✅ Check if results are ready
                 if state == "done":
