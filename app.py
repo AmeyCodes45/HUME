@@ -1,9 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 import requests
 import json
 import time
 import os
 import logging
+import ijson
 
 # 📚 Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -17,7 +18,7 @@ if not HUME_API_KEY:
     logging.error("❗️ HUME_API_KEY is not set. Please configure it in environment variables.")
     exit(1)
 
-# 🎯 Define emotion level thresholds
+# 🎯 Emotion thresholds
 def get_level(score):
     if score >= 0.7:
         return "High"
@@ -26,10 +27,11 @@ def get_level(score):
     else:
         return "Low"
 
+confidence_emotions = {"calm", "focused", "content"}
+nervousness_emotions = {"nervous", "worried", "tense"}
 
 @app.route("/process_hume", methods=["GET"])
 def process_hume():
-    # ✅ Get job_id from request query parameters (GET method fix)
     job_id = request.args.get("job_id")
 
     if not job_id:
@@ -37,162 +39,118 @@ def process_hume():
         return jsonify({"error": "Job ID is required"}), 400
 
     logging.info(f"✅ Received job_id: {job_id}")
-
-    # 🕰️ Poll Hume API for results with retries
     url = f"https://api.hume.ai/v0/batch/jobs/{job_id}/predictions"
     headers = {"X-Hume-Api-Key": HUME_API_KEY}
 
-    max_retries = 18  # Increased to 3 minutes (18 x 10 sec)
+    max_retries = 18
     results = None
 
     for i in range(max_retries):
         logging.info(f"⏳ Attempt {i + 1}/{max_retries} - Fetching results from Hume API...")
         try:
-            response = requests.get(url, headers=headers, timeout=30)  # Increased timeout to 30 sec
+            response = requests.get(url, headers=headers, timeout=30)
         except requests.exceptions.RequestException as e:
             logging.error(f"⚠️ API request failed: {str(e)}")
             return jsonify({"error": "Failed to connect to Hume API"}), 500
 
-        # ✅ Log raw response for troubleshooting
         logging.debug(f"API Response: {response.status_code}, {response.text[:500]}")
 
         if response.status_code == 200:
             try:
                 results = response.json()
-
-                # ✅ Check if results are in the expected format
                 if isinstance(results, list) and len(results) > 0 and "results" in results[0]:
-                    logging.info("🎉 Hume API results ready! Proceeding to processing...")
-
-                    # ✅ Save Full JSON for Debugging
                     with open("hume_api_response.json", "w") as f:
                         json.dump(results, f, indent=4)
-                    logging.info("✅ Full Hume API JSON saved for inspection.")
+                    logging.info("✅ Full Hume API JSON saved.")
                     break
                 else:
-                    logging.error("⚠️ Unexpected response format or no results found.")
+                    logging.error("⚠️ Unexpected response format or no results.")
                     return jsonify({"error": "Unexpected API response format or no results found"}), 500
             except json.JSONDecodeError:
                 logging.error("⚠️ Error parsing JSON response from Hume API")
                 return jsonify({"error": "Failed to parse Hume API response"}), 500
         elif response.status_code == 404:
-            logging.error("⚠️ Invalid job_id or results not found.")
             return jsonify({"error": "Invalid job_id or results not ready"}), 404
         elif response.status_code == 401:
-            logging.error("❗️ Unauthorized - Invalid Hume API Key.")
             return jsonify({"error": "Unauthorized - Check your API Key"}), 401
         elif response.status_code == 500:
-            logging.error("⚠️ Hume API internal error.")
             return jsonify({"error": "Hume API internal error"}), 500
 
-        time.sleep(10)  # Wait before retrying
+        time.sleep(10)
 
     if not results:
-        logging.error("❌ Failed to retrieve data from Hume API after retries.")
-        return jsonify({"error": "Failed to retrieve data from Hume AI"}), 500
+        return jsonify({"error": "Failed to retrieve data from Hume AI after retries"}), 500
 
-    # 🧠 Process API response
-    try:
-        predictions = []
-        for result in results:
-            for prediction in result["results"]["predictions"]:
-                if "grouped_predictions" in prediction["models"]["face"]:
-                    predictions.extend(prediction["models"]["face"]["grouped_predictions"][0]["predictions"])
+    # ✅ Stream JSON file instead of loading full into memory
+    file_path = "hume_api_response.json"
+    if not os.path.exists(file_path):
+        return jsonify({"error": "hume_api_response.json not found"}), 404
 
-        if not predictions or not isinstance(predictions, list):
-            logging.error("⚠️ No valid predictions in the API response.")
-            return jsonify({"error": "No predictions found in Hume API results"}), 500
-
-    except (KeyError, IndexError, TypeError) as e:
-        logging.error(f"⚠️ Invalid data format or missing predictions: {str(e)}")
-        return jsonify({"error": "Invalid data format from Hume API"}), 500
-
-    # ✅ Define correct emotion categories
-    confidence_emotions = ["calm", "focused", "content"]
-    nervousness_emotions = ["nervous", "worried", "tense"]
-
-    # 🔍 Initialize variables for analysis
-    emotion_scores = {}
+    confidence_sum = 0
+    nervousness_sum = 0
+    frame_count = 0
     top_emotions = []
-    confidence_sum, nervousness_sum, switches = 0, 0, 0
-    frame_count = len(predictions)
+    emotion_counts = {}
 
-    # 📊 Process each frame to calculate scores efficiently
-    for frame in predictions:
-        emotions = frame.get("emotions", [])
-        if not emotions:
-            continue
+    try:
+        with open(file_path, "r") as f:
+            frames = ijson.items(f, "item.results.predictions.item.models.face.grouped_predictions.item.predictions.item")
 
-        # ✅ Get top emotion per frame
-        top_emotion_frame = max(emotions, key=lambda x: x["score"])
-        top_emotions.append(top_emotion_frame["name"])
-        emotion_scores[top_emotion_frame["name"]] = (
-            emotion_scores.get(top_emotion_frame["name"], 0) + 1
-        )
+            for frame in frames:
+                emotions = frame.get("emotions", [])
+                if not emotions:
+                    continue
 
-        # ✅ Confidence Score - Corrected logic
-        confidence_scores = [e["score"] for e in emotions if e["name"].lower() in confidence_emotions]
-        if confidence_scores:
-            confidence_sum += sum(confidence_scores) / len(confidence_scores)
+                top_emotion = max(emotions, key=lambda e: e["score"])
+                top_name = top_emotion["name"]
+                top_emotions.append(top_name)
+                emotion_counts[top_name] = emotion_counts.get(top_name, 0) + 1
 
-        # ✅ Nervousness Score - Corrected logic
-        nervousness_scores = [e["score"] for e in emotions if e["name"].lower() in nervousness_emotions]
-        if nervousness_scores:
-            nervousness_sum += sum(nervousness_scores) / len(nervousness_scores)
+                confidence_scores = [e["score"] for e in emotions if e["name"].lower() in confidence_emotions]
+                if confidence_scores:
+                    confidence_sum += sum(confidence_scores) / len(confidence_scores)
 
-    # ✅ Top Emotion - Most Frequent with max occurrences
-    final_top_emotion = max(emotion_scores, key=emotion_scores.get, default="Neutral")
-    top_emotion_count = emotion_scores.get(final_top_emotion, 0)
+                nervousness_scores = [e["score"] for e in emotions if e["name"].lower() in nervousness_emotions]
+                if nervousness_scores:
+                    nervousness_sum += sum(nervousness_scores) / len(nervousness_scores)
 
-    # ✅ Engagement Score - Emotion Switches Count
-    switches = sum(1 for i in range(1, len(top_emotions)) if top_emotions[i] != top_emotions[i - 1])
-    engagement_score = switches / (len(top_emotions) - 1) if len(top_emotions) > 1 else 0
+                frame_count += 1
 
-    # 📈 Calculate average scores (avoid division by zero)
-    confidence_score = round(confidence_sum / frame_count, 2) if frame_count > 0 else 0
-    nervousness_score = round(nervousness_sum / frame_count, 2) if frame_count > 0 else 0
-    engagement_score = round(engagement_score, 2)
+        if frame_count == 0:
+            return jsonify({"error": "No valid frames found"}), 400
 
-    # ✅ Determine the emotion level correctly based on frequency
-    emotion_level = (
-        "Excellent"
-        if top_emotion_count / frame_count >= 0.7
-        else "Good"
-        if top_emotion_count / frame_count >= 0.4
-        else "Average"
-    )
+        switches = sum(1 for i in range(1, len(top_emotions)) if top_emotions[i] != top_emotions[i - 1])
+        engagement_score = switches / (len(top_emotions) - 1) if len(top_emotions) > 1 else 0
 
-    # 🎁 Generate response
-    result = {
-        "top_emotion": f"{final_top_emotion} ({emotion_level})",
-        "engagement_score": engagement_score,
-        "engagement_level": get_level(engagement_score),
-        "nervousness_score": nervousness_score,
-        "nervousness_level": get_level(nervousness_score),
-        "confidence_score": confidence_score,
-        "confidence_level": get_level(confidence_score),
-    }
+        top_emotion = max(emotion_counts, key=emotion_counts.get, default="Neutral")
 
-    logging.info(f"✅ Corrected result: {result}")
-    return jsonify(result), 200
+        result = {
+            "confidence_score": round(confidence_sum / frame_count, 2),
+            "confidence_level": get_level(confidence_sum / frame_count),
+            "nervousness_score": round(nervousness_sum / frame_count, 2),
+            "nervousness_level": get_level(nervousness_sum / frame_count),
+            "engagement_score": round(engagement_score, 2),
+            "engagement_level": get_level(engagement_score),
+            "top_emotion": f"{top_emotion} (Average)"
+        }
+
+        logging.info(f"✅ Final Result: {result}")
+        return jsonify(result), 200
+
+    except Exception as e:
+        logging.error(f"❌ Error during processing: {str(e)}")
+        return jsonify({"error": f"Processing failed: {str(e)}"}), 500
 
 @app.route("/get_hume_json", methods=["GET"])
 def get_hume_json():
     file_path = "hume_api_response.json"
-
     if not os.path.exists(file_path):
-        logging.error("⚠️ hume_api_response.json file not found.")
         return jsonify({"error": "hume_api_response.json not found"}), 404
-
     try:
         return send_file(file_path, as_attachment=True, download_name="hume_api_response.json")
     except Exception as e:
-        logging.error(f"⚠️ Error while sending file: {str(e)}")
         return jsonify({"error": "Error while sending the file"}), 500
 
-
-
 if __name__ == "__main__":
-    # ✅ Fetch port dynamically for deployment
-    port = int(os.environ.get("PORT", 10000))  # Default to 10000 if PORT is not set
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=True)
